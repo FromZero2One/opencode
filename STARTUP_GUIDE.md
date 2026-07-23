@@ -1,7 +1,7 @@
 # OpenCode 项目启动操作手册
 
 > 适用仓库：[anomalyco/opencode](https://github.com/anomalyco/opencode)
-> 最后更新：2026-07-09
+> 最后更新：2026-07-23
 
 ---
 
@@ -19,14 +19,29 @@
 4. [常用参数](#4-常用参数)
 5. [环境变量](#5-环境变量)
 6. [查看日志](#6-查看日志)
-7. [项目结构速览](#7-项目结构速览)
-8. [常见问题排查](#8-常见问题排查)
-9. [本地调试](#9-本地调试)
-   - [终端 + VS Code Attach](#91-方式一终端启动--vs-code-attach推荐)
-   - [VS Code Launch 直接启动](#92-方式二vs-code-launch-直接启动)
-   - [分开调试 Server 和 TUI](#93-方式三分开调试-server-和-tui)
-   - [TUI 内置调试工具](#94-tui-内置调试工具)
-   - [常用断点位置](#95-常用断点位置)
+7. [项目架构全貌](#7-项目架构全貌)
+   - [技术栈](#71-技术栈)
+   - [分层包架构](#72-分层包架构)
+   - [核心目录详解](#73-packagesopencode-src-核心目录)
+   - [核心抽象：Effect 框架](#74-核心抽象effect-框架)
+   - [数据流全景](#75-数据流全景)
+   - [核心入口文件速查](#76-核心入口文件速查)
+   - [根目录关键文件](#77-根目录关键文件)
+8. [TUI 架构详解](#8-tui-架构详解)
+   - [架构概览](#81-架构概览)
+   - [核心文件详解](#82-核心文件详解)
+   - [完整启动流程](#83-完整启动流程)
+   - [用户操作流程](#84-用户操作流程)
+   - [SIGUSR2 配置重载](#85-sigus2-配置重载)
+   - [堆快照分析](#86-堆快照分析)
+9. [常见问题排查](#9-常见问题排查)
+10. [本地调试](#10-本地调试)
+   - [终端 + VS Code Attach](#101-方式一终端启动--vs-code-attach推荐)
+   - [VS Code Launch 直接启动](#102-方式二vs-code-launch-直接启动)
+   - [分开调试 Server 和 TUI](#103-方式三分开调试-server-和-tui)
+   - [TUI 内置调试工具](#104-tui-内置调试工具)
+   - [常用断点位置](#105-常用断点位置)
+11. [附录：命令速查表](#11-附录命令速查表)
 
 ---
 
@@ -38,7 +53,7 @@
 | **Node.js**（可选） | `>= 18` | `node --version` |
 | **Git** | 任意 | `git --version` |
 
-> 当前环境：Bun **1.3.13** ✅
+> 当前环境：Bun **1.3.14** ✅
 
 ---
 
@@ -369,62 +384,424 @@ grep ERROR C:/Users/Administrator/AppData/Local/opencode/log/opencode.log
 
 ---
 
-## 7. 项目结构速览
+## 7. 项目架构全貌
+
+### 7.1 技术栈
+
+| 类别 | 技术选型 |
+|------|----------|
+| **语言** | TypeScript 5.8（`"type": "module"` 全库 ESM） |
+| **运行时** | **Bun 1.3**（主力开发/运行）、Node.js（npm 发布包）、Cloudflare Workers（云服务）、Electron（桌面） |
+| **核心框架** | [Effect](https://effect.website) v4（函数式编程 + 依赖注入 + 错误处理 + 并发） |
+| **终端 UI** | SolidJS + [OpenTUI](https://github.com/opentui/tui) |
+| **Web UI** | SolidJS + Vite + Tailwind CSS v4 |
+| **桌面壳** | Electron（electron-vite 构建 + electron-builder 打包） |
+| **构建编排** | Turborepo |
+| **包管理** | Bun Workspaces + 版本目录（catalogs） |
+| **基础设施** | SST v4 → Cloudflare Workers + AWS（S3, Lambda） |
+| **数据库** | SQLite（Drizzle ORM + Effect 封装） |
+| **LLM 抽象** | Vercel AI SDK + 自定义 Provider 适配器（Anthropic, OpenAI, Google, Bedrock, xAI 等 10+） |
+| **HTTP 服务** | Effect 原生 `HttpRouter` / `HttpApi` |
+| **代码检查** | Oxlint |
+| **Git Hooks** | Husky |
+
+### 7.2 分层包架构
+
+项目 34+ 个包按**严格分层**组织，依赖方向从 Layer 0 → Layer 7：
 
 ```
-opencode/
-├── package.json              # 根工程配置
-├── bunfig.toml               # Bun 配置
-├── README.md                 # 项目介绍
-├── CONTRIBUTING.md           # 贡献指南
-├── TUI_DEBUGGING_GUIDE.md    # TUI 调试指南（中文）
-├── install                   # 一键安装脚本
+packages/
 │
-├── packages/
-│   ├── opencode/             # 🔥 核心包 - CLI 入口 + 业务逻辑 + TUI
-│   │   ├── src/
-│   │   │   ├── index.ts      # CLI 入口文件
-│   │   │   ├── cli/
-│   │   │   │   ├── cmd/
-│   │   │   │   │   └── tui.ts    # TUI 命令处理器
-│   │   │   │   └── tui/
-│   │   │   │       ├── layer.ts  # TUI 运行层（注入依赖）
-│   │   │   │       └── worker.ts # Worker 线程（RPC + Server）
-│   │   │   ├── server/       # Hono HTTP 服务器
-│   │   │   ├── session/      # 会话管理
-│   │   │   └── agent/        # Agent 逻辑
-│   │   └── script/
-│   │       └── build.ts      # 构建脚本
-│   │
-│   ├── core/                 # 核心库（Effect 架构）
-│   ├── app/                  # Web UI 组件（SolidJS）
-│   ├── desktop/              # Electron 桌面应用
-│   ├── console/app/          # Web Console 管理面板
-│   ├── sdk/js/               # JavaScript SDK
-│   ├── storybook/            # UI 组件库文档
-│   └── stats/app/            # 统计面板
+├─ Layer 0: 基础/数据层
+│   ├── schema/              ← 领域模型、事件枚举、数据类型（唯一依赖：effect）
+│   ├── protocol/            ← HTTP API 定义（Effect HttpApi，19 个 API 组）
+│   ├── effect-drizzle-sqlite/  ← Drizzle ORM + SQLite 的 Effect 封装
+│   └── effect-sqlite-node/     ← SQLite Node 绑定的 Effect 封装
 │
-├── .opencode/                # OpenCode 内部配置
-├── artifacts/                # 构建产物
-├── infra/                    # 基础设施（SST/AWS）
-└── nix/                      # Nix 包管理
+├─ Layer 1: 核心业务逻辑
+│   ├── core/                ← 系统心脏：会话管理、工具定义、文件系统、PTY、权限、DB
+│   ├── llm/                 ← LLM Provider 抽象（10+ 提供商适配器）
+│   └── codemode/            ← 受控代码执行沙箱（Effect-native）
+│
+├─ Layer 2: 服务器 / API
+│   ├── server/              ← HTTP 路由、中间件、19 个 API Handler 实现
+│   └── opencode/            ← 主入口包：CLI + TUI + Agent 系统 + 会话循环
+│
+├─ Layer 3: UI 应用
+│   ├── tui/                 ← 终端 UI（SolidJS + OpenTUI 组件）
+│   ├── app/                 ← Web 应用（SolidJS + Vite + Tailwind v4）
+│   ├── ui/                  ← 共享 UI 组件库（图标、Markdown、Diff 渲染）
+│   └── session-ui/          ← 会话组件（Diff、Markdown 流、行内注释）
+│
+├─ Layer 4: 应用壳
+│   ├── desktop/             ← Electron 桌面应用（自动更新 + 签名 + NSIS/DMG/AppImage）
+│   └── web/                 ← 文档站（Astro + Starlight → Cloudflare）
+│
+├─ Layer 5: 云控制台 & 统计
+│   ├── console/             ← SaaS 管理面板（SolidJS + Nitro + Cloudflare + Stripe）
+│   └── stats/               ← 统计/分析
+│
+├─ Layer 6: SDK / 插件 / 集成
+│   ├── sdk/js/              ← 自动生成的 JS SDK（基于 OpenAPI 规范）
+│   ├── plugin/              ← 插件开发 SDK（工具、TUI、Provider 扩展）
+│   ├── slack/               ← Slack Bot 集成
+│   └── client/              ← 生成的客户端代码
+│
+└─ Layer 7: 其他基础设施
+      ├── storybook/         ← UI 组件文档
+      ├── identity/          ← OAuth/身份认证
+      ├── enterprise/        ← 企业功能
+      ├── containers/        ← Docker 容器配置
+      ├── docs/              ← 文档
+      ├── sdk-next/          ← 下一代 SDK
+      ├── httpapi-codegen/   ← HttpApi 代码生成器
+      ├── http-recorder/     ← HTTP 录制（测试用）
+      ├── script/            ← 共享构建工具
+      └── function/          ← 通用 Cloudflare Functions
 ```
 
-### 核心入口文件
+### 7.3 packages/opencode/src/ 核心目录
+
+`packages/opencode` 是**最核心的包**，包含 CLI 入口、TUI 应用、Agent 系统、工具实现等：
+
+| 目录 | 用途 |
+|------|------|
+| `cli/` | CLI 实现：yargs 命令注册、TUI 引导、终端渲染、错误处理 |
+| `cli/cmd/` | 每个子命令一个模块：`run/`、`serve.ts`、`web.ts`、`debug/`、`session.ts`、`mcp.ts`、`agent.ts` 等 |
+| `cli/cmd/run/` | 交互模式运行时：runtime.boot、生命周期、stdin 输入、滚动、流传输 |
+| `server/` | HTTP 服务器初始化、WebSocket 追踪、公共 API 路由 |
+| `session/` | 会话管理：消息处理、LLM 交互、压缩、重试、摘要、状态 |
+| `tool/` | 工具实现（apply_patch, read, write, edit, grep, glob, shell, websearch 等） |
+| `agent/` | Agent 系统：agent 定义、子 agent 权限、prompt 模板、摘要、探索 |
+| `mcp/` | MCP 客户端集成：认证、浏览器、OAuth |
+| `command/` | 斜杠命令系统 |
+| `plugin/` | 插件系统（GitHub Copilot、OpenAI 适配器、TUI 插件） |
+| `config/` | 用户配置管理 |
+| `git/` | Git 集成 |
+| `lsp/` | LSP（语言服务器协议）集成 |
+| `project/` | 项目/工作区管理 |
+| `auth/` | 认证 |
+| `provider/` | Provider 管理 |
+
+### 7.4 核心抽象：Effect 框架
+
+整个项目基于 **Effect** v4 构建。理解 Effect 是读懂代码的前提：
+
+```ts
+// Effect 类型 = 描述一个计算
+Effect<Success, Error, RequiredDependencies>
+
+// yield* = Effect 中的 await
+const data = yield* someEffect
+
+// Effect.fn = 定义一个 Effect 函数
+const myHandler = Effect.fn("myHandler")(function* (args) {
+  const svc = yield* MyService
+  return yield* svc.doWork(args)
+})
+
+// Layer = 依赖注入层
+const MainLayer = Layer.mergeAll(
+  MyService.Live,
+  OtherService.Live,
+  Database.Live,
+)
+Effect.provide(MainLayer)  // 注入所有依赖后运行
+
+// pipe = 函数式管道
+pipe(
+  input,
+  Effect.flatMap(transform),
+  Effect.catchAll(handleError),
+  Effect.provide(MainLayer),
+)
+```
+
+**Effect 解决的问题**：类型安全的依赖注入、可组合的错误处理、结构化并发、测试替身注入。
+
+### 7.5 数据流全景
+
+#### TUI 模式数据流
+
+```
+用户执行: bun dev [directory]
+  ↓
+packages/opencode/src/index.ts     ← yargs 解析命令
+  ↓
+cli/cmd/run.ts                     ← RunCommand
+  ↓
+run/runtime.boot.ts                ← 创建 InstanceRuntime
+  ↓ 启动 Worker 线程
+cli/tui/worker.ts                  ← HTTP Server (RPC)
+  ↓
+@opencode-ai/tui (SolidJS + OpenTUI)  ← 终端渲染
+  ↓  用户输入 prompt
+SDK Client → RPC fetch → Server
+  ↓
+session/llm.ts                     ← LLM 交互循环
+  ↓
+tool/ (read/write/grep/shell/...)  ← 工具执行
+  ↓  SSE 事件流
+TUI 实时更新显示
+```
+
+#### API Server 模式数据流
+
+```
+bun dev serve
+  ↓
+index.ts → ServeCommand
+  ↓
+cli/cmd/serve.ts → Server.listen()
+  ↓
+server/server.ts → HttpRouter.serve()
+  ↓  请求进入
+中间件栈: auth → location → schema
+  ↓
+19 个 API 组路由 (Session/Message/FileSystem/Command/...)
+  ↓
+Handler 调用 core 服务层
+  ↓
+JSON / SSE 响应
+```
+
+#### LLM 调用链路
+
+```
+SessionRunner.run()
+  ↓
+构建请求 (system prompt + 历史消息 + 工具定义)
+  ↓
+llm/route/ → 路由到对应 Provider
+  ↓
+llm/providers/anthropic.ts  (或 openai/google/bedrock/...)
+  ↓
+llm/protocols/anthropic-messages.ts  (协议格式转换)
+  ↓
+LLM API 调用 (流式返回)
+  ↓
+SessionRunner 处理响应 → 解析工具调用 → 执行 → 继续循环
+```
+
+### 7.6 核心入口文件速查
 
 | 文件 | 作用 |
 |------|------|
-| `packages/opencode/src/index.ts` | 🚪 CLI 主入口，所有模式由此进入 |
-| `packages/opencode/src/cli/cmd/tui.ts` | TUI 命令解析 + Worker 创建 |
-| `packages/opencode/src/cli/tui/layer.ts` | TUI 服务依赖注入 |
-| `packages/opencode/src/cli/tui/worker.ts` | Worker 线程 RPC + Server |
-| `packages/app/src/` | Web UI 组件 |
+| `packages/opencode/src/index.ts` | 🚪 **CLI 主入口**，所有模式由此进入 |
+| `packages/opencode/src/cli/cmd/run.ts` | TUI 模式命令处理器 |
+| `packages/opencode/src/cli/cmd/serve.ts` | API Server 模式命令处理器 |
+| `packages/opencode/src/cli/cmd/run/runtime.boot.ts` | TUI 运行时引导（创建 InstanceRuntime） |
+| `packages/opencode/src/server/server.ts` | HTTP 服务初始化（Effect HttpRouter） |
+| `packages/opencode/src/session/` | 会话管理核心逻辑 |
+| `packages/opencode/src/agent/` | Agent 系统 |
+| `packages/opencode/src/tool/registry.ts` | 工具注册表 |
+| `packages/opencode/src/tool/` | 各工具实现（read/write/grep/shell 等） |
+| `packages/protocol/src/api.ts` | HTTP API 定义（19 个 API 组） |
+| `packages/server/src/handlers/` | API Handler 实现 |
+| `packages/server/src/middleware/` | 权限/认证/会话中间件 |
+| `packages/core/src/` | 核心库（Effect 架构） |
+| `packages/llm/src/` | LLM Provider 抽象层 |
+| `packages/schema/src/` | 所有领域模型定义 |
+| `packages/app/src/` | Web UI 组件（SolidJS） |
+| `packages/tui/src/app.tsx` | TUI 应用入口（SolidJS + OpenTUI） |
+| `sst.config.ts`（根目录） | SST v4 基础设施配置 |
+
+### 7.7 根目录关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `package.json` | 根工作区配置、Bun workspaces + 版本目录（catalogs） |
+| `bunfig.toml` | Bun 安装配置（精确版本、最小发行年龄） |
+| `turbo.json` | Turborepo 任务编排（typecheck、build、test） |
+| `sst.config.ts` | 基础设施定义（Cloudflare + AWS + Stripe + PlanetScale + Honeycomb） |
+| `tsconfig.json` | 继承 `@tsconfig/bun/tsconfig.json` |
+| `.oxlintrc.json` | 代码检查规则 |
+| `flake.nix` / `flake.lock` | Nix 可复现构建环境 |
+| `install` | Shell 一键安装脚本（curl-pipe-bash） |
 
 ---
 
-## 8. 常见问题排查
+## 8. TUI 架构详解
 
-### 8.1 `Cannot find module 'entities/lib/decode.js'`
+> 本章节内容来自 `TUI_DEBUGGING_GUIDE.md`，已合并至此。
+
+### 8.1 架构概览
+
+TUI 采用**主进程 + Worker 进程**双进程架构：
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ 主进程 (Main Thread)                                        │
+│                                                             │
+│  CLI Command (src/cli/cmd/tui.ts)                           │
+│    ├── 解析命令行参数                                        │
+│    ├── 创建 Worker 线程 (new Worker)                         │
+│    ├── 建立 RPC 通信通道                                      │
+│    └── 启动 TUI 运行层 (cli/tui/layer.ts)                    │
+│                                                              │
+│  TUI App (packages/tui/src/app.tsx)                          │
+│    ├── OpenTUI 渲染器                                        │
+│    ├── SolidJS 组件树                                        │
+│    └── SDKProvider (通过 RPC/HTTP 连接后端)                   │
+└────────────────────────────────┬───────────────────────────┘
+                                 │ RPC 通信 (fetch/server/shutdown)
+                                 ▼
+┌────────────────────────────────────────────────────────────┐
+│ Worker 进程                                                 │
+│                                                              │
+│  Worker (src/cli/tui/worker.ts)                              │
+│    ├── 启动 HTTP Server                                      │
+│    ├── 处理 RPC 调用 (fetch/server/shutdown)                 │
+│    ├── 全局事件总线 (GlobalBus)                               │
+│    └── 实例运行时管理 (InstanceRuntime)                       │
+└────────────────────────────────────────────────────────────┘
+```
+
+**通信模式**：
+- **内部模式**：TUI 通过 RPC 调用 Worker 进程的 `fetch` 方法（默认）
+- **外部模式**：TUI 通过 HTTP 直连外部 Server（使用 `--port` 等网络参数时）
+
+### 8.2 核心文件详解
+
+#### CLI 命令入口 — `packages/opencode/src/cli/cmd/tui.ts`
+
+```ts
+export const TuiThreadCommand = cmd({
+  command: "$0 [project]",
+  handler: async (args) => {
+    const worker = new Worker(file)           // 1. 创建 Worker
+    const client = Rpc.client<typeof rpc>(worker)  // 2. 建立 RPC
+    const transport = external
+      ? { url: ..., fetch: undefined }
+      : { url: "http://opencode.internal",
+          fetch: createWorkerFetch(client),
+          events: createEventSource(client) }
+    const { run } = await import("../tui/layer")
+    await Effect.runPromise(run({ ...transport, args }))
+  }
+})
+```
+
+#### TUI 运行层 — `packages/opencode/src/cli/tui/layer.ts`
+
+注入全局服务依赖（Global / AppNodeBuilder），然后调用 `@opencode-ai/tui` 的 `run` 函数：
+
+```ts
+export function run(input: TuiInput) {
+  return runTui(input).pipe(Effect.provide(AppNodeBuilder.build(Global.node)))
+}
+```
+
+#### Worker 进程 — `packages/opencode/src/cli/tui/worker.ts`
+
+| RPC 方法 | 说明 |
+|---------|------|
+| `fetch` | 代理 HTTP 请求到 Server |
+| `snapshot` | 写入堆快照 |
+| `server` | 启动外部 HTTP Server |
+| `checkUpgrade` | 检查更新 |
+| `reload` | 重载配置（收到 SIGUSR2 时触发） |
+| `shutdown` | 关闭 Worker |
+
+### 8.3 完整启动流程
+
+```
+用户执行: bun dev
+  ↓
+opencode/src/index.ts              ← CLI 入口，yargs 分发
+  ↓
+TuiThreadCommand.handler()         ← 解析参数
+  ↓
+new Worker(file)                   ← 创建 Worker 进程
+  ↓
+Worker 启动 HTTP Server            ← Server.Default()
+  ↓
+建立 RPC 通信通道                   ← createWorkerFetch()
+  ↓
+runTui() → createCliRenderer()    ← 创建终端渲染器（OpenTUI）
+  ↓
+render(<App />) → SolidJS 渲染     ← 组件树挂载
+  ↓
+SDKProvider 连接后端               ← 通过 RPC/HTTP
+  ↓
+显示 Home 页面                     ← 用户可以输入 prompt
+```
+
+### 8.4 用户操作流程
+
+#### 输入 Prompt 流程
+
+```
+用户输入 prompt
+  ↓
+PromptInput 组件捕获输入
+  ↓
+SDKProvider → SDK Client          ← 调用 client.session.prompt()
+  ↓  HTTP/RPC 请求
+Server (HttpRouter) → SessionHandler
+  ↓
+SessionV2.prompt()                ← 核心处理
+  ├── 持久化 session_input
+  └── 触发 SessionExecution.wake()
+  ↓
+SessionRunCoordinator             ← 合并唤醒请求
+  ↓
+SessionRunner.run()
+  ├── runTurn() → 构建 LLM 请求
+  ├── llm.stream() → 调用模型
+  └── 发布 SessionEvent (SSE)
+  ↓
+SDKProvider 接收事件 → 更新 UI    ← 用户看到结果
+```
+
+#### 路由切换流程
+
+```
+用户按 "/" 打开命令面板
+  ↓
+CommandPaletteDialog              ← 显示命令列表
+  ↓
+useRoute().navigate()             ← 更新路由状态
+  ↓
+Switch/Match 组件                 ← 渲染对应页面
+```
+
+### 8.5 SIGUSR2 配置重载
+
+Worker 进程支持通过信号重载配置：
+
+```bash
+# 获取 OpenCode 进程 ID
+ps aux | grep opencode
+# 发送重载信号
+kill -USR2 <pid>
+```
+
+Worker 执行 `reload` RPC：
+1. 使配置缓存失效
+2. 释放所有实例
+3. 触发全局 Disposed 事件
+
+### 8.6 堆快照分析
+
+TUI 内置内存分析工具：
+
+```bash
+# 在 TUI 中输入（按 / 打开命令面板）：
+app.heap_snapshot
+```
+
+快照写入当前目录，生成两个文件：
+- `tui.heapsnapshot` — TUI 主进程堆快照
+- `server.heapsnapshot` — Worker/Server 进程堆快照
+
+分析方法：Chrome DevTools → Memory → Load → 选择 `.heapsnapshot` 文件。可对比多个快照找出内存泄漏。
+
+---
+
+## 9. 常见问题排查
+
+### 9.1 `Cannot find module 'entities/lib/decode.js'`
 
 **原因**：Windows 上 Bun 安装 `htmlparser2` 时缺少其依赖 `entities` 包。
 
@@ -433,7 +810,7 @@ opencode/
 bun install entities@4.5.0
 ```
 
-### 8.2 `Error: ENOENT reading "...@clack/prompts"`
+### 9.2 `Error: ENOENT reading "...@clack/prompts"`
 
 **原因**：`@clack/prompts` 包未正确安装。
 
@@ -442,7 +819,7 @@ bun install entities@4.5.0
 bun install @clack/prompts@latest
 ```
 
-### 8.3 `Error: ENOENT reading "...@fastify/error"`
+### 9.3 `Error: ENOENT reading "...@fastify/error"`
 
 **原因**：`@fastify/error` 包未正确安装（加载 DEBUG 日志级别时可能触发）。
 
@@ -453,7 +830,7 @@ bun install @fastify/error@latest
 
 > Windows 上 Bun 可能存在依赖解析不完整的问题，遇到这类 `ENOENT reading` 错误时，直接 `bun install <包名>` 即可。
 
-### 8.4 `Error: listen EADDRINUSE`
+### 9.4 `Error: listen EADDRINUSE`
 
 **原因**：端口被占用。
 
@@ -467,7 +844,7 @@ netstat -ano | findstr :4096
 taskkill /PID <PID> /F
 ```
 
-### 8.5 TUI 启动后无显示
+### 9.5 TUI 启动后无显示
 
 **原因**：通常是因为在后台运行或没有 TTY 支持。
 
@@ -485,7 +862,7 @@ tmux new-session -d -s opencode 'bun dev'
 tmux attach -t opencode
 ```
 
-### 8.6 依赖安装失败
+### 9.6 依赖安装失败
 
 ```bash
 # 强制重新安装
@@ -495,7 +872,7 @@ bun install
 # 如遇网络问题，可尝试设置镜像（Windows 在 bunfig.toml 中配置）
 ```
 
-### 8.7 `OPENCODE_SERVER_PASSWORD` 未设置警告
+### 9.7 `OPENCODE_SERVER_PASSWORD` 未设置警告
 
 API Server 模式下如果看到此警告，表示服务器无访问保护。
 
@@ -505,7 +882,7 @@ export OPENCODE_SERVER_PASSWORD=your-secure-password
 bun dev serve
 ```
 
-### 8.8 图示：启动排查决策流
+### 9.8 图示：启动排查决策流
 
 ```mermaid
 flowchart TD
@@ -532,9 +909,9 @@ flowchart TD
 
 ---
 
-## 9. 本地调试
+## 10. 本地调试
 
-### 9.1 方式一：终端启动 + VS Code Attach（推荐）
+### 10.1 方式一：终端启动 + VS Code Attach（推荐）
 
 Bun 调试最稳定的方式，先以 inspect 模式在终端启动，再用 VS Code 附加调试器。这样可以避免断点映射错位问题。
 
@@ -567,7 +944,7 @@ bun dev serve
 
 > 可用 `--inspect-wait` 替代 `--inspect`，等待调试器连接后再执行代码；或 `--inspect-brk` 在第一行中断。
 
-### 9.2 方式二：VS Code Launch 直接启动
+### 10.2 方式二：VS Code Launch 直接启动
 
 VS Code 中按 F5 直接启动，**可能遇到断点映射错位问题**，但仍可尝试。
 
@@ -609,7 +986,7 @@ VS Code 中按 F5 直接启动，**可能遇到断点映射错位问题**，但�
 
 > 需要安装 [Bun VS Code 扩展](https://marketplace.visualstudio.com/items?itemName=oven.bun-vscode)（项目 `.vscode/settings.example.json` 中有推荐）。
 
-### 9.3 方式三：分别调试 Server 和 TUI
+### 10.3 方式三：分别调试 Server 和 TUI
 
 TUI 模式下，服务器在 Worker 线程中运行，断点可能不触发。此时可将二者分开调试：
 
@@ -624,7 +1001,7 @@ opencode attach http://localhost:4096
 bun run --inspect=ws://localhost:6499/ --cwd packages/opencode --conditions=browser ./src/index.ts
 ```
 
-### 9.4 TUI 内置调试工具
+### 10.4 TUI 内置调试工具
 
 在 TUI 界面中按 `/` 打开命令面板：
 
@@ -638,7 +1015,7 @@ bun run --inspect=ws://localhost:6499/ --cwd packages/opencode --conditions=brow
 
 **堆快照分析**：输入 `app.heap_snapshot` 后，快照写入当前目录（`tui.heapsnapshot` / `server.heapsnapshot`），可在 Chrome DevTools → Memory → Load 中分析。
 
-### 9.5 常用断点位置
+### 10.5 常用断点位置
 
 | 文件 | 说明 |
 |------|------|
@@ -654,7 +1031,7 @@ bun run --inspect=ws://localhost:6499/ --cwd packages/opencode --conditions=brow
 
 ---
 
-## 附录：命令速查表
+## 11. 附录：命令速查表
 
 | 命令 | 说明 | 常用度 |
 |------|------|--------|
@@ -676,7 +1053,7 @@ bun run --inspect=ws://localhost:6499/ --cwd packages/opencode --conditions=brow
 
 > **相关文档**：
 > - [CONTRIBUTING.md](./CONTRIBUTING.md) — 贡献指南与详细开发说明
-> - [TUI_DEBUGGING_GUIDE.md](./TUI_DEBUGGING_GUIDE.md) — TUI 调试与架构详解
 > - [AGENTS.md](./AGENTS.md) — Agent 系统说明
 > - [CONTEXT.md](./CONTEXT.md) — 项目上下文
+> - [NEW_PROJECT_GUIDE.md](./NEW_PROJECT_GUIDE.md) — 新项目快速上手方法论
 > - 官方文档：[opencode.ai/docs](https://opencode.ai/docs)

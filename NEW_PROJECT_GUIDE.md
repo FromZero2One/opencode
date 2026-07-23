@@ -119,24 +119,56 @@ pipe(
 
 ---
 
-## 7. 一个实际案例：本项目的启动入口
+## 7. 一个实际案例：以本项目为例快速上手指南
+
+> 完整架构和启动手册详见 [STARTUP_GUIDE.md](./STARTUP_GUIDE.md)。
+
+### 7.1 第一印象
+
+**OpenCode** 是一个 AI Coding Agent 运行平台（类似 Claude Code / Cursor），基于 TypeScript + Effect v4 + SolidJS + Bun。
 
 ```
-bun dev
-  └─ package.json "scripts.dev"
-       └─ packages/opencode/src/index.ts    ← yargs CLI 入口
-            ├─ .command(TuiThreadCommand)   ← bun dev → TUI
-            ├─ .command(ServeCommand)       ← bun dev serve → API server
-            └─ .command(WebCommand)         ← bun dev web → web UI
+代码量：34+ npm packages / 2000+ 文件
+运行时：Bun（主力）、Cloudflare Workers（云服务）、Electron（桌面）
 ```
 
+### 7.2 快速上手检查清单
+
+拿到项目后按此顺序阅读：
+
 ```
-bun dev serve
-  └─ index.ts → ServeCommand
-       └─ packages/opencode/src/cli/cmd/serve.ts
-            └─ packages/opencode/src/server/server.ts → Server.listen()
-                 └─ Hono HTTP 服务监听端口
+① README.md + package.json  → 它是什么？技术栈？
+② packages/*/package.json  → 包依赖方向，画分层架构
+③ src/index.ts              → 入口文件，看 yargs 注册了哪些命令
+④ 核心抽象（Effect）        → yield* / Layer / pipe 的含义
+⑤ 追踪一个请求              → 用户 prompt → Server → LLM → 工具 → 回显
 ```
+
+### 7.3 分层架构速览
+
+项目 34+ 个包分为 8 层，**上层依赖下层**：
+
+| 层 | 关键包 | 职责 |
+|----|--------|------|
+| 0 基础 | `schema`, `protocol` | 领域模型、数据类型、API 定义 |
+| 1 核心 | `core`, `llm` | 会话、工具、权限、PTY、LLM Provider |
+| 2 服务 | `opencode`, `server` | CLI 入口、HTTP 服务、路由中间件 |
+| 3 UI | `tui`, `app`, `ui` | 终端 UI、Web 应用、共享组件 |
+| 4 壳 | `desktop`, `web` | Electron 桌面、文档站 |
+| 5 云 | `console`, `stats` | SaaS 管理面板、统计 |
+| 6 SDK | `sdk/js`, `plugin` | JS SDK、插件扩展 |
+| 7 基础 | `infra/`, `nix/` | SST/AWS 基础设施、Nix 构建 |
+
+### 7.4 关键判断清单
+
+| 问题 | 如何判断 |
+|------|----------|
+| 这是什么项目？ | `README.md` + `package.json#description` + `package.json#bin` |
+| 技术栈是什么？ | `devDependencies` 扫一圈（Effect / SolidJS / Drizzle） |
+| 依赖方向？ | 对比不同包的 `dependencies`，上层包依赖下层包 |
+| 核心抽象？ | 看入口文件 import 了什么（`effect` / `yargs`） |
+| 数据流？ | 从入口文件开始追踪一个完整请求 |
+| 运行环境？ | `bun`（CLI）、`cloudflare workers`（云）、`electron`（桌面） |
 
 ---
 
