@@ -101,6 +101,8 @@ Learn more about [agents](https://opencode.ai/v2/docs/agents).
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/v2/docs).
 
+For an overview of the repository architecture, module boundaries, and key design decisions, see [ARCHITECTURE.zh.md](./ARCHITECTURE.zh.md). For a complete picture of user-facing features and capabilities, see [FEATURES.zh.md](./FEATURES.zh.md).
+
 ### Contributing
 
 If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
